@@ -24,6 +24,11 @@
   #preview { width: 100%; border-radius: 12px; margin-top: 16px; display: none; }
   .note { font-size: 12px; color: #888; margin-top: 8px; }
 
+  /* キーワード選択（最大2つ・選択順に左上→右上） */
+  .kws { display: flex; flex-wrap: wrap; gap: 8px; }
+  .kw { width: auto; padding: 8px 14px; font-size: 13px; margin: 0; background: #fff; color: var(--ink); border: 1.5px solid #ccc; border-radius: 999px; }
+  .kw.sel { background: var(--red); color: #fff; border-color: var(--red); }
+
   /* カメラ画面（全画面オーバーレイ） */
   #camView { position: fixed; inset: 0; background: #000; display: none; flex-direction: column; z-index: 10; }
   #camView.on { display: flex; }
@@ -31,7 +36,9 @@
   #video { width: 100%; height: 100%; object-fit: cover; }
   /* 撮影ガイド：完成画像の文字エリアを事前表示 */
   .g { position: absolute; border: 2px dashed rgba(255,255,255,.9); background: rgba(230,0,51,.25); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-  .g-badge { left: 4%; top: 4%; width: 19%; height: 9%; }
+  .g-kw1 { left: 4%; top: 4%; width: 22%; height: 9%; }
+  .g-kw2 { right: 4%; top: 4%; width: 22%; height: 9%; }
+  .g-price { right: 4%; top: 63%; width: 26%; height: 7%; }
   .g-chips { left: 5%; top: 74%; width: 90%; height: 7%; }
   .g-band  { left: 0; top: 86%; width: 100%; height: 14%; }
   .g-frame { position: absolute; inset: 0; border: 4px solid rgba(230,0,51,.7); pointer-events: none; }
@@ -42,13 +49,16 @@
 <body>
 
 <!-- 更新情報（画面最上部に必ず表示） -->
-<div class="ver">## Version-3 — 20260813 142500 更新 - 定価空白時はチップを「送料無料・匿名配送」の2つのみ表示に変更</div>
+<div class="ver">## Version-4 — 20260813 150000 更新 - キーワード2択選択（左上/右上）・固定チップ3つ化・定価を右下タグ表示に変更</div>
 
 <h1>メルカリ<span>サムネ</span>メーカー</h1>
 
 <label>タイトル（サムネ下部帯に表示）</label>
 <input type="text" id="title" maxlength="18" placeholder="例：定禅寺ジャズフェス 2025 Tシャツ">
 <div class="count"><span id="cnt">0</span>/18文字</div>
+
+<label>アピールキーワード（最大2つ / 1つ目→左上・2つ目→右上）</label>
+<div class="kws" id="kws"></div>
 
 <label>定価（円・不明な場合は空白のまま）</label>
 <input type="number" id="price" placeholder="例：4500（空白なら定価は非表示）" min="0">
@@ -67,8 +77,10 @@
   <div class="sq">
     <video id="video" playsinline autoplay muted></video>
     <div class="g-frame"></div>
-    <div class="g g-badge">美品</div>
-    <div class="g g-chips">送料無料 ／ 匿名配送 ／ 定価</div>
+    <div class="g g-kw1">KW1</div>
+    <div class="g g-kw2">KW2</div>
+    <div class="g g-price">定価</div>
+    <div class="g g-chips">送料無料 ／ 匿名配送 ／ ペット・喫煙なし</div>
     <div class="g g-band">タイトル帯</div>
   </div>
   <div class="cam-btns">
@@ -85,10 +97,29 @@ const $ = id => document.getElementById(id);
 const title = $("title"), price = $("price"), cv = $("cv"), ctx = cv.getContext("2d");
 let photo = null, stream = null;
 
+// アピールキーワード候補（選択順を保持・最大2つ）
+const KW_LIST = ["新品未使用", "未開封", "タグ付き", "美品", "一度着用のみ",
+                 "現地購入品", "会場限定", "完売品", "廃盤", "入手困難",
+                 "正規品", "購入証明あり"];
+let selected = [];
+KW_LIST.forEach(k => {
+  const b = document.createElement("button");
+  b.className = "kw";
+  b.textContent = k;
+  b.onclick = () => {
+    const i = selected.indexOf(k);
+    if (i >= 0) selected.splice(i, 1);            // 再タップで解除
+    else if (selected.length < 2) selected.push(k); // 2つまで選択可
+    else return;                                   // 3つ目は無視
+    b.classList.toggle("sel");
+  };
+  $("kws").appendChild(b);
+});
+
 // 文字数カウンタと生成ボタン活性制御
 function refresh() {
   $("cnt").textContent = title.value.length;
-  $("gen").disabled = !(photo && title.value); // 定価は任意入力
+  $("gen").disabled = !(photo && title.value); // キーワード・定価は任意
 }
 title.oninput = refresh;
 price.oninput = refresh;
@@ -118,7 +149,7 @@ $("shoot").onclick = () => {
   photo = tmp;
   $("camClose").onclick();
   refresh();
-  alert("撮影しました。タイトルと定価を入力して生成してください。");
+  alert("撮影しました。タイトルを入力して生成してください。");
 };
 
 // ファイル選択（フォールバック）：中央正方形に切り出し
@@ -138,50 +169,57 @@ $("filePick").onchange = e => {
   img.src = URL.createObjectURL(f);
 };
 
-// サムネ生成（v2Bデザイン）
-$("gen").onclick = () => {
-  const F = w => `900 ${w}px system-ui, sans-serif`;
+// 角丸タグ描画の共通処理（文字幅に応じて可変幅）
+function tag(text, x, y, opt) {
+  ctx.font = `900 ${opt.fs}px system-ui, sans-serif`;
+  const w = ctx.measureText(text).width + opt.pad * 2;
+  const drawX = opt.align === "right" ? x - w : x; // 右寄せ対応
+  ctx.fillStyle = opt.bg;
+  ctx.beginPath();
+  ctx.roundRect(drawX, y, w, opt.h, opt.h / 4);
+  ctx.fill();
+  if (opt.line) { ctx.strokeStyle = opt.line; ctx.lineWidth = 5; ctx.stroke(); }
+  ctx.fillStyle = opt.fg;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, drawX + w / 2, y + opt.h / 2 + 2);
+  return w;
+}
 
+// サムネ生成（v2Bデザイン Version-4）
+$("gen").onclick = () => {
   // 写真（明度・コントラスト補正）
   ctx.filter = "brightness(1.2) contrast(1.05)";
   ctx.drawImage(photo, 0, 0);
   ctx.filter = "none";
 
-  // 左上バッジ「美品」
-  ctx.fillStyle = "#E63C28";
-  ctx.beginPath();
-  ctx.roundRect(40, 40, 210, 100, 20);
-  ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.font = F(56);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("美品", 145, 92);
+  // キーワードバッジ：1つ目→左上、2つ目→右上
+  const badge = { fs: 52, h: 100, pad: 30, bg: "#E63C28", fg: "#fff" };
+  if (selected[0]) tag(selected[0], 40, 40, badge);
+  if (selected[1]) tag(selected[1], 1040, 40, { ...badge, align: "right" });
 
-  // チップ：送料無料・匿名配送（定価は入力時のみ追加）
-  const chips = ["送料無料", "匿名配送"];
-  if (price.value) chips.push("定価¥" + Number(price.value).toLocaleString());
-  const cw = 310, ch = 78, gap = 24, y = 800;
-  let x = (1080 - cw * chips.length - gap * (chips.length - 1)) / 2; // 個数に応じて中央揃え
-  chips.forEach(t => {
-    ctx.fillStyle = "rgba(255,255,255,.93)";
-    ctx.strokeStyle = "#E60033";
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.roundRect(x, y, cw, ch, 39);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#E60033";
-    ctx.font = F(40);
-    ctx.fillText(t, x + cw / 2, y + ch / 2 + 2, cw - 30);
-    x += cw + gap;
-  });
+  // 定価タグ：チップ列の直上・右寄せ（空白なら非表示）
+  if (price.value) {
+    tag("定価¥" + Number(price.value).toLocaleString(), 1040, 690,
+        { fs: 44, h: 84, pad: 26, bg: "#E60033", fg: "#fff", align: "right" });
+  }
+
+  // 固定チップ3つ：送料無料・匿名配送・ペット・喫煙なし環境
+  const chips = ["送料無料", "匿名配送", "ペット・喫煙なし環境"];
+  const opt = { fs: 38, h: 78, pad: 26, bg: "rgba(255,255,255,.93)", fg: "#E60033", line: "#E60033" };
+  ctx.font = `900 ${opt.fs}px system-ui, sans-serif`;
+  const gap = 20;
+  const total = chips.reduce((s, t) => s + ctx.measureText(t).width + opt.pad * 2, 0) + gap * 2;
+  let x = (1080 - total) / 2;
+  chips.forEach(t => { x += tag(t, x, 800, opt) + gap; });
 
   // 下部帯＋タイトル（maxWidth指定ではみ出し防止）
   ctx.fillStyle = "rgba(0,0,0,.7)";
   ctx.fillRect(0, 930, 1080, 150);
   ctx.fillStyle = "#fff";
-  ctx.font = F(52);
+  ctx.font = "900 52px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   ctx.fillText(title.value, 540, 1007, 1000);
 
   // メルカリレッドの縁（16px）
