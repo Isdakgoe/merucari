@@ -42,7 +42,7 @@
 <body>
 
 <!-- 更新情報（画面最上部に必ず表示） -->
-<div class="ver">## Version-1 — 20260813 045000 更新 - 初版：カメラガイド撮影・サムネ生成機能を追加</div>
+<div class="ver">## Version-2 — 20260813 141500 更新 - 定価の空白入力に対応（空白時は「定価不明」と表示）</div>
 
 <h1>メルカリ<span>サムネ</span>メーカー</h1>
 
@@ -50,8 +50,8 @@
 <input type="text" id="title" maxlength="18" placeholder="例：定禅寺ジャズフェス 2025 Tシャツ">
 <div class="count"><span id="cnt">0</span>/18文字</div>
 
-<label>定価（円・数字のみ）</label>
-<input type="number" id="price" placeholder="例：4500" min="0">
+<label>定価（円・不明な場合は空白のまま）</label>
+<input type="number" id="price" placeholder="例：4500（空白なら「定価不明」と表示）" min="0">
 
 <button class="btn-cam" id="openCam">📷 カメラで撮影（ガイド付き）</button>
 <input type="file" id="filePick" accept="image/*" hidden>
@@ -88,7 +88,7 @@ let photo = null, stream = null;
 // 文字数カウンタと生成ボタン活性制御
 function refresh() {
   $("cnt").textContent = title.value.length;
-  $("gen").disabled = !(photo && title.value && price.value);
+  $("gen").disabled = !(photo && title.value); // 定価は任意入力
 }
 title.oninput = refresh;
 price.oninput = refresh;
@@ -159,7 +159,8 @@ $("gen").onclick = () => {
   ctx.fillText("美品", 145, 92);
 
   // チップ3つ：送料無料・匿名配送・定価
-  const chips = ["送料無料", "匿名配送", "定価¥" + Number(price.value).toLocaleString()];
+  const priceText = price.value ? "定価¥" + Number(price.value).toLocaleString() : "定価不明";
+  const chips = ["送料無料", "匿名配送", priceText];
   const cw = 310, ch = 78, gap = 24, y = 800;
   let x = (1080 - cw * 3 - gap * 2) / 2;
   chips.forEach(t => {
