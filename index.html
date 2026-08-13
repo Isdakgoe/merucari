@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>メルカリサムネメーカー</title>
+<style>
+  /* 基本レイアウト（モバイルファースト・最軽量） */
+  :root { --red: #E60033; --ink: #222; --bg: #FAF8F5; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); padding: 16px; max-width: 480px; margin: auto; }
+  .ver { font-size: 11px; color: #888; border-left: 3px solid var(--red); padding-left: 8px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin-bottom: 16px; }
+  h1 span { color: var(--red); }
+  label { display: block; font-size: 13px; font-weight: 700; margin: 14px 0 4px; }
+  input[type="text"], input[type="number"] { width: 100%; padding: 12px; font-size: 16px; border: 1.5px solid #ccc; border-radius: 10px; background: #fff; }
+  input:focus { outline: 2px solid var(--red); border-color: transparent; }
+  .count { font-size: 11px; color: #888; text-align: right; }
+  button { width: 100%; padding: 14px; font-size: 16px; font-weight: 700; border: none; border-radius: 12px; margin-top: 12px; cursor: pointer; }
+  .btn-cam { background: var(--ink); color: #fff; }
+  .btn-gen { background: var(--red); color: #fff; }
+  .btn-dl { background: #fff; color: var(--red); border: 2px solid var(--red); }
+  button:disabled { opacity: .4; }
+  #preview { width: 100%; border-radius: 12px; margin-top: 16px; display: none; }
+  .note { font-size: 12px; color: #888; margin-top: 8px; }
+
+  /* カメラ画面（全画面オーバーレイ） */
+  #camView { position: fixed; inset: 0; background: #000; display: none; flex-direction: column; z-index: 10; }
+  #camView.on { display: flex; }
+  .sq { position: relative; width: 100vw; height: 100vw; max-width: 480px; max-height: 480px; margin: auto; overflow: hidden; }
+  #video { width: 100%; height: 100%; object-fit: cover; }
+  /* 撮影ガイド：完成画像の文字エリアを事前表示 */
+  .g { position: absolute; border: 2px dashed rgba(255,255,255,.9); background: rgba(230,0,51,.25); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .g-badge { left: 4%; top: 4%; width: 19%; height: 9%; }
+  .g-chips { left: 5%; top: 74%; width: 90%; height: 7%; }
+  .g-band  { left: 0; top: 86%; width: 100%; height: 14%; }
+  .g-frame { position: absolute; inset: 0; border: 4px solid rgba(230,0,51,.7); pointer-events: none; }
+  .cam-btns { display: flex; gap: 12px; padding: 16px; }
+  .cam-btns button { margin: 0; }
+</style>
+</head>
+<body>
+
+<!-- 更新情報（画面最上部に必ず表示） -->
+<div class="ver">## Version-1 — 20260813 045000 更新 - 初版：カメラガイド撮影・サムネ生成機能を追加</div>
+
+<h1>メルカリ<span>サムネ</span>メーカー</h1>
+
+<label>タイトル（サムネ下部帯に表示）</label>
+<input type="text" id="title" maxlength="18" placeholder="例：定禅寺ジャズフェス 2025 Tシャツ">
+<div class="count"><span id="cnt">0</span>/18文字</div>
+
+<label>定価（円・数字のみ）</label>
+<input type="number" id="price" placeholder="例：4500" min="0">
+
+<button class="btn-cam" id="openCam">📷 カメラで撮影（ガイド付き）</button>
+<input type="file" id="filePick" accept="image/*" hidden>
+<button class="btn-cam" id="openFile" style="background:#666">🖼 写真を選択（カメラ不可時）</button>
+
+<button class="btn-gen" id="gen" disabled>サムネを生成</button>
+<img id="preview" alt="生成プレビュー">
+<button class="btn-dl" id="dl" style="display:none">💾 画像を保存</button>
+<p class="note">保存できない場合はプレビューを長押し→「画像を保存」でも保存できます。</p>
+
+<!-- カメラ画面 -->
+<div id="camView">
+  <div class="sq">
+    <video id="video" playsinline autoplay muted></video>
+    <div class="g-frame"></div>
+    <div class="g g-badge">美品</div>
+    <div class="g g-chips">送料無料 ／ 匿名配送 ／ 定価</div>
+    <div class="g g-band">タイトル帯</div>
+  </div>
+  <div class="cam-btns">
+    <button style="background:#444;color:#fff;flex:1" id="camClose">閉じる</button>
+    <button style="background:var(--red);color:#fff;flex:2" id="shoot">撮影する</button>
+  </div>
+</div>
+
+<canvas id="cv" width="1080" height="1080" hidden></canvas>
+
+<script>
+// 要素参照
+const $ = id => document.getElementById(id);
+const title = $("title"), price = $("price"), cv = $("cv"), ctx = cv.getContext("2d");
+let photo = null, stream = null;
+
+// 文字数カウンタと生成ボタン活性制御
+function refresh() {
+  $("cnt").textContent = title.value.length;
+  $("gen").disabled = !(photo && title.value && price.value);
+}
+title.oninput = refresh;
+price.oninput = refresh;
+
+// カメラ起動（背面カメラ優先）
+$("openCam").onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    $("video").srcObject = stream;
+    $("camView").classList.add("on");
+  } catch {
+    alert("カメラを起動できません（HTTPS必須）。「写真を選択」をご利用ください。");
+  }
+};
+$("camClose").onclick = () => {
+  stream?.getTracks().forEach(t => t.stop());
+  $("camView").classList.remove("on");
+};
+
+// 撮影：映像の中央正方形を切り出し
+$("shoot").onclick = () => {
+  const v = $("video"), s = Math.min(v.videoWidth, v.videoHeight);
+  const sx = (v.videoWidth - s) / 2, sy = (v.videoHeight - s) / 2;
+  const tmp = document.createElement("canvas");
+  tmp.width = tmp.height = 1080;
+  tmp.getContext("2d").drawImage(v, sx, sy, s, s, 0, 0, 1080, 1080);
+  photo = tmp;
+  $("camClose").onclick();
+  refresh();
+  alert("撮影しました。タイトルと定価を入力して生成してください。");
+};
+
+// ファイル選択（フォールバック）：中央正方形に切り出し
+$("openFile").onclick = () => $("filePick").click();
+$("filePick").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    const s = Math.min(img.width, img.height);
+    const tmp = document.createElement("canvas");
+    tmp.width = tmp.height = 1080;
+    tmp.getContext("2d").drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 1080, 1080);
+    photo = tmp;
+    refresh();
+  };
+  img.src = URL.createObjectURL(f);
+};
+
+// サムネ生成（v2Bデザイン）
+$("gen").onclick = () => {
+  const F = w => `900 ${w}px system-ui, sans-serif`;
+
+  // 写真（明度・コントラスト補正）
+  ctx.filter = "brightness(1.2) contrast(1.05)";
+  ctx.drawImage(photo, 0, 0);
+  ctx.filter = "none";
+
+  // 左上バッジ「美品」
+  ctx.fillStyle = "#E63C28";
+  ctx.beginPath();
+  ctx.roundRect(40, 40, 210, 100, 20);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = F(56);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("美品", 145, 92);
+
+  // チップ3つ：送料無料・匿名配送・定価
+  const chips = ["送料無料", "匿名配送", "定価¥" + Number(price.value).toLocaleString()];
+  const cw = 310, ch = 78, gap = 24, y = 800;
+  let x = (1080 - cw * 3 - gap * 2) / 2;
+  chips.forEach(t => {
+    ctx.fillStyle = "rgba(255,255,255,.93)";
+    ctx.strokeStyle = "#E60033";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.roundRect(x, y, cw, ch, 39);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#E60033";
+    ctx.font = F(40);
+    ctx.fillText(t, x + cw / 2, y + ch / 2 + 2, cw - 30);
+    x += cw + gap;
+  });
+
+  // 下部帯＋タイトル（maxWidth指定ではみ出し防止）
+  ctx.fillStyle = "rgba(0,0,0,.7)";
+  ctx.fillRect(0, 930, 1080, 150);
+  ctx.fillStyle = "#fff";
+  ctx.font = F(52);
+  ctx.fillText(title.value, 540, 1007, 1000);
+
+  // メルカリレッドの縁（16px）
+  ctx.strokeStyle = "#E60033";
+  ctx.lineWidth = 32;
+  ctx.strokeRect(0, 0, 1080, 1080);
+
+  $("preview").src = cv.toDataURL("image/jpeg", 0.92);
+  $("preview").style.display = "block";
+  $("dl").style.display = "block";
+};
+
+// 保存
+$("dl").onclick = () => {
+  const a = document.createElement("a");
+  a.href = $("preview").src;
+  a.download = "mercari_thumb.jpg";
+  a.click();
+};
+</script>
+</body>
+</html>
