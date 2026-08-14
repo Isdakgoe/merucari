@@ -37,10 +37,12 @@
   /* 撮影ガイド：完成画像の文字エリアを事前表示 */
   .g { position: absolute; border: 2px dashed rgba(255,255,255,.9); background: rgba(230,0,51,.25); color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
   .g-kw1 { left: 4%; top: 4%; width: 22%; height: 9%; }
-  .g-kw2 { right: 4%; top: 4%; width: 22%; height: 9%; }
-  .g-price { right: 4%; top: 63%; width: 26%; height: 7%; }
-  .g-chips { left: 5%; top: 74%; width: 90%; height: 7%; }
-  .g-band  { left: 0; top: 86%; width: 100%; height: 14%; }
+  .g-kw2 { right: 4%; top: 16%; width: 22%; height: 9%; }
+  .g-reserve { left: 0; top: 88%; width: 45%; height: 12%; background: rgba(255,255,255,.2); }
+  .g-price { right: 4%; top: 53%; width: 26%; height: 7%; }
+  .g-chips { left: 5%; top: 64%; width: 90%; height: 7%; }
+  .g-band  { left: 0; top: 75%; width: 100%; height: 13%; }
+  .g-mprice { left: 0; top: 89%; width: 45%; height: 11%; background: rgba(120,120,120,.4); }
   .g-frame { position: absolute; inset: 0; border: 4px solid rgba(230,0,51,.7); pointer-events: none; }
   .cam-btns { display: flex; gap: 12px; padding: 16px; }
   .cam-btns button { margin: 0; }
@@ -49,7 +51,7 @@
 <body>
 
 <!-- 更新情報（画面最上部に必ず表示） -->
-<div class="ver">## Version-4 — 20260813 150000 更新 - キーワード2択選択（左上/右上）・固定チップ3つ化・定価を右下タグ表示に変更</div>
+<div class="ver">## Version-5 — 20260813 152000 更新 - メルカリ一覧の価格表示回避（下端を空け情報を上移動）＋♡アイコンと右上バッジの重なりを解消</div>
 
 <h1>メルカリ<span>サムネ</span>メーカー</h1>
 
@@ -82,6 +84,8 @@
     <div class="g g-price">定価</div>
     <div class="g g-chips">送料無料 ／ 匿名配送 ／ ペット・喫煙なし</div>
     <div class="g g-band">タイトル帯</div>
+    <div class="g g-reserve">メルカリ価格表示</div>
+    <div class="g g-mprice">¥ メルカリ価格表示</div>
   </div>
   <div class="cam-btns">
     <button style="background:#444;color:#fff;flex:1" id="camClose">閉じる</button>
@@ -196,11 +200,11 @@ $("gen").onclick = () => {
   // キーワードバッジ：1つ目→左上、2つ目→右上
   const badge = { fs: 52, h: 100, pad: 30, bg: "#E63C28", fg: "#fff" };
   if (selected[0]) tag(selected[0], 40, 40, badge);
-  if (selected[1]) tag(selected[1], 1040, 40, { ...badge, align: "right" });
+  if (selected[1]) tag(selected[1], 1040, 170, { ...badge, align: "right" }); // ♡アイコン回避のため下げる
 
   // 定価タグ：チップ列の直上・右寄せ（空白なら非表示）
   if (price.value) {
-    tag("定価¥" + Number(price.value).toLocaleString(), 1040, 690,
+    tag("定価¥" + Number(price.value).toLocaleString(), 1040, 570,
         { fs: 44, h: 84, pad: 26, bg: "#E60033", fg: "#fff", align: "right" });
   }
 
@@ -211,16 +215,16 @@ $("gen").onclick = () => {
   const gap = 20;
   const total = chips.reduce((s, t) => s + ctx.measureText(t).width + opt.pad * 2, 0) + gap * 2;
   let x = (1080 - total) / 2;
-  chips.forEach(t => { x += tag(t, x, 800, opt) + gap; });
+  chips.forEach(t => { x += tag(t, x, 690, opt) + gap; });
 
   // 下部帯＋タイトル（maxWidth指定ではみ出し防止）
   ctx.fillStyle = "rgba(0,0,0,.7)";
-  ctx.fillRect(0, 930, 1080, 150);
+  ctx.fillRect(0, 810, 1080, 140); // 下端110pxはメルカリ価格表示用に空ける
   ctx.fillStyle = "#fff";
   ctx.font = "900 52px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(title.value, 540, 1007, 1000);
+  ctx.fillText(title.value, 540, 880, 1000);
 
   // メルカリレッドの縁（16px）
   ctx.strokeStyle = "#E60033";
